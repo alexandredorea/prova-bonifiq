@@ -37,12 +37,14 @@ namespace ProvaPub.Controllers
         [HttpGet("products")]
         public async Task<PagedResult<Product>> ListProducts(int page, CancellationToken cancellationToken)
         {
+            if (page <= 0) page = 1;
             return await _productService.ListProducts(page, cancellationToken);
         }
 
         [HttpGet("customers")]
         public async Task<PagedResult<Customer>> ListCustomers(int page, CancellationToken cancellationToken)
         {
+            if (page <= 0) page = 1;
             return await _customerService.ListCustomers(page, cancellationToken);
         }
     }
