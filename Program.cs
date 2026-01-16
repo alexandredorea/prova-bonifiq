@@ -8,10 +8,18 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+var brazilTz = TimeZoneInfo.FindSystemTimeZoneById("E. South America Standard Time");
+builder.Services.AddSingleton(brazilTz);
+
 builder.Services.AddScoped<IRandomService, RandomService>();
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<ICustomerService, CustomerService>();
 builder.Services.AddScoped<IPaginatorService, PaginatorService>();
+builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IPaymentFactory, PaymentFactory>();
+builder.Services.AddScoped<IPaymentStrategy, PixPaymentStrategy>();
+builder.Services.AddScoped<IPaymentStrategy, CreditCardPaymentStrategy>();
+builder.Services.AddScoped<IPaymentStrategy, PaypalPaymentStrategy>();
 
 builder.Services.AddDbContext<TestDbContext>(options => options.UseSqlServer(builder.Configuration.GetConnectionString("ctx")));
 var app = builder.Build();
