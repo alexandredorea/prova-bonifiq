@@ -6,13 +6,13 @@ namespace ProvaPub.Services
 {
     public sealed class RandomService : IRandomService
     {
-        private readonly TestDbContext _ctx;
+        private readonly IServiceScopeFactory _scopeFactory;
         private const int MaxAttempts = 100; // simulacao para evitar loop infinito
         private const int Range = 100; // máximo permitido no banco (0 a 99)
 
-        public RandomService(TestDbContext context)
+        public RandomService(IServiceScopeFactory scopeFactory)
         {
-            _ctx = context;
+            _scopeFactory = scopeFactory;
         }
 
         public async Task<int> GetRandom(CancellationToken cancellationToken = default)
@@ -25,22 +25,18 @@ namespace ProvaPub.Services
                 number = Random.Shared.Next(Range);
                 entity = new RandomNumber { Number = number };
 
-                //bool exists = await _ctx.Numbers
-                //    .AsNoTracking()
-                //    .AnyAsync(x => x.Number == number, cancellationToken);
-                //if (exists)
-                //    continue;
-
                 try
                 {
-                    _ctx.Numbers.Add(entity);
-                    await _ctx.SaveChangesAsync(cancellationToken);
+                    // Cria um novo scope, quero evitar manipular tracking manualmente
+                    using var scope = _scopeFactory.CreateScope();
+                    var ctx = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+                    ctx.Numbers.Add(entity);
+                    await ctx.SaveChangesAsync(cancellationToken);
                     return number;
                 }
                 catch (DbUpdateException ex) when (IsUniqueViolation(ex))
                 {
                     // colisão real — tenta outro
-                    _ctx.Entry(entity).State = EntityState.Detached;
                     continue;
                 }
             }
