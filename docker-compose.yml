@@ -1,0 +1,6 @@
+services:
+  provapub.api:
+    image: ${DOCKER_REGISTRY-}provapubapi
+    build:
+      context: .
+      dockerfile: src/ProvaPub.Api/Dockerfile

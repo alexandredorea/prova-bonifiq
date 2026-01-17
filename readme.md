@@ -43,7 +43,8 @@ dotnet tool install --global dotnet-ef
 ```
 Agora, pode rodar as migrations de fato:
 ```
-dotnet ef database update 
+# dotnet ef database update 
+dotnet ef database update --project src/ProvaPub.Infrastructure/ProvaPub.Infrastructure.csproj --startup-project src/ProvaPub.Api/ProvaPub.Api.csproj
 ``` 
 
 Pronto, o projeto já criou as tabelas e alguns registros no seu localDB. 
