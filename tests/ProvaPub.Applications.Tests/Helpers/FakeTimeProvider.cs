@@ -1,13 +1,24 @@
 ﻿namespace ProvaPub.Applications.Tests.Helpers;
 
-public sealed class FakeTimeProvider(DateTime utcNow) : TimeProvider
+public sealed class FakeTimeProvider : TimeProvider
 {
-    private DateTimeOffset _utcNow = new DateTimeOffset(utcNow, TimeSpan.Zero);
+    private DateTimeOffset _utcNow;
+
+    public FakeTimeProvider(DateTime utcNow)
+    {
+        if (utcNow.Kind != DateTimeKind.Utc)
+            throw new ArgumentException("DateTime precisa ser UTC", nameof(utcNow));
+
+        _utcNow = new DateTimeOffset(utcNow, TimeSpan.Zero);
+    }
 
     public override DateTimeOffset GetUtcNow() => _utcNow;
 
     public void SetUtcNow(DateTime utcNow)
     {
+        if (utcNow.Kind != DateTimeKind.Utc)
+            throw new ArgumentException("DateTime precisa ser UTC", nameof(utcNow));
+
         _utcNow = new DateTimeOffset(utcNow, TimeSpan.Zero);
     }
 

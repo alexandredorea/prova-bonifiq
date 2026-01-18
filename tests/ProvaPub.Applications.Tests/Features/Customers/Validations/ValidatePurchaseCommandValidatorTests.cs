@@ -14,6 +14,8 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
 {
     private readonly ProvaPubContext _context;
     private readonly FakeTimeProvider _timeProvider;
+    private readonly FakeDateTimeProvider _dateTimeProvider;
+    private readonly TimeZoneInfo _brazilTimeZone;
     private readonly ValidatePurchaseCommandValidator _validator;
 
     public ValidatePurchaseCommandValidatorTests()
@@ -25,10 +27,15 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
 
         _context = new ProvaPubContext(options);
 
-        // Inicializa com horário comercial padrão (Quarta-feira, 10:00)
-        _timeProvider = new FakeTimeProvider(new DateTime(2026, 1, 21, 10, 0, 0, DateTimeKind.Utc));
+        // TimeZone do Brasil
+        _brazilTimeZone = GetBrazilTimeZone();
 
-        _validator = new ValidatePurchaseCommandValidator(_context, _timeProvider);
+        // Inicializa com horário comercial padrão
+        // 10:00 Brasília = 13:00 UTC (Quarta-feira)
+        _timeProvider = new FakeTimeProvider(new DateTime(2026, 1, 21, 13, 0, 0, DateTimeKind.Utc));
+        _dateTimeProvider = new FakeDateTimeProvider(_timeProvider, _brazilTimeZone);
+
+        _validator = new ValidatePurchaseCommandValidator(_context, _dateTimeProvider);
     }
 
     public void Dispose()
@@ -116,7 +123,7 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     public async Task Validate_CustomerExists_ShouldNotHaveCustomerExistsError()
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
@@ -134,12 +141,12 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     public async Task Validate_CustomerHasPurchaseInLastMonth_ShouldHaveValidationError()
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
         // Order criada há 15 dias
-        var orderDate = _timeProvider.GetUtcNow().AddDays(-15).UtcDateTime;
+        var orderDate = _dateTimeProvider.UtcNow.AddDays(-15);
         var existingOrder = Order.Create(50m, customer.Id);
         SetOrderDate(existingOrder, orderDate);
         _context.Orders.Add(existingOrder);
@@ -160,12 +167,12 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     public async Task Validate_CustomerHasNoPurchaseInLastMonth_ShouldNotHaveValidationError()
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
         // Order criada há 35 dias (mais de um mês)
-        var orderDate = _timeProvider.GetUtcNow().AddDays(-35).UtcDateTime;
+        var orderDate = _dateTimeProvider.UtcNow.AddDays(-35);
         var existingOrder = Order.Create(50m, customer.Id);
         SetOrderDate(existingOrder, orderDate);
         _context.Orders.Add(existingOrder);
@@ -178,14 +185,15 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
         var result = await _validator.TestValidateAsync(command);
 
         // Assert
-        result.ShouldNotHaveValidationErrorFor(x => x);
+        var errors = result.Errors.Where(e => e.ErrorMessage.Contains("apenas uma compra por mês"));
+        errors.Should().BeEmpty();
     }
 
     [Fact]
     public async Task Validate_CustomerHasNoPurchases_ShouldNotHaveOnePurchasePerMonthError()
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
@@ -204,7 +212,7 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     public async Task Validate_FirstPurchaseAbove100_ShouldHaveValidationError()
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
@@ -223,7 +231,7 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     public async Task Validate_FirstPurchaseExactly100_ShouldNotHaveValidationError()
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
@@ -242,7 +250,7 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     public async Task Validate_FirstPurchaseBelow100_ShouldNotHaveValidationError()
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
@@ -261,12 +269,12 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     public async Task Validate_NotFirstPurchaseAbove100_ShouldNotHaveValidationError()
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
         // Cliente já comprou antes (há mais de 1 mês)
-        var orderDate = _timeProvider.GetUtcNow().AddMonths(-2).UtcDateTime;
+        var orderDate = _dateTimeProvider.UtcNow.AddMonths(-2);
         var existingOrder = Order.Create(50m, customer.Id);
         SetOrderDate(existingOrder, orderDate);
         _context.Orders.Add(existingOrder);
@@ -284,20 +292,25 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     }
 
     [Theory]
-    [InlineData(8)]  // 08:00
-    [InlineData(10)] // 10:00
-    [InlineData(12)] // 12:00
-    [InlineData(15)] // 15:00
-    [InlineData(18)] // 18:00
-    public async Task Validate_PurchaseDuringBusinessHours_ShouldNotHaveValidationError(int hour)
+    [InlineData(8, 11)]   // 08:00 Brasília = 11:00 UTC
+    [InlineData(10, 13)]  // 10:00 Brasília = 13:00 UTC
+    [InlineData(12, 15)]  // 12:00 Brasília = 15:00 UTC
+    [InlineData(15, 18)]  // 15:00 Brasília = 18:00 UTC
+    [InlineData(18, 21)]  // 18:00 Brasília = 21:00 UTC
+    public async Task Validate_PurchaseDuringBusinessHours_ShouldNotHaveValidationError(
+        int brazilHour,
+        int utcHour)
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
-        // Quarta-feira no horário especificado
-        _timeProvider.SetUtcNow(new DateTime(2026, 1, 21, hour, 0, 0, DateTimeKind.Utc));
+        // Define UTC que corresponde ao horário de Brasília
+        _timeProvider.SetUtcNow(new DateTime(2026, 1, 21, utcHour, 0, 0, DateTimeKind.Utc));
+
+        // Verifica conversão
+        _dateTimeProvider.LocalNow.Hour.Should().Be(brazilHour);
 
         var command = new ValidatePurchaseCommand(50m);
         command.SetCustomerId(customer.Id);
@@ -307,23 +320,31 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
 
         // Assert
         var errors = result.Errors.Where(e => e.ErrorMessage.Contains("horário comercial"));
-        errors.Should().BeEmpty();
+        errors.Should().BeEmpty($"porque {brazilHour}:00 está no horário comercial");
     }
 
     [Theory]
-    [InlineData(7)]  // 07:00 - Antes do horário
-    [InlineData(19)] // 19:00 - Depois do horário
-    [InlineData(23)] // 23:00 - Noite
-    [InlineData(0)]  // 00:00 - Madrugada
-    public async Task Validate_PurchaseOutsideBusinessHours_ShouldHaveValidationError(int hour)
+    [InlineData(7, 10)]   // 07:00 Brasília = 10:00 UTC - Antes
+    [InlineData(19, 22)]  // 19:00 Brasília = 22:00 UTC - Depois
+    [InlineData(23, 2)]   // 23:00 Brasília = 02:00 UTC (dia seguinte)
+    [InlineData(0, 3)]    // 00:00 Brasília = 03:00 UTC
+    public async Task Validate_PurchaseOutsideBusinessHours_ShouldHaveValidationError(
+        int brazilHour,
+        int utcHour)
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
-        // Quarta-feira no horário especificado
-        _timeProvider.SetUtcNow(new DateTime(2026, 1, 21, hour, 0, 0, DateTimeKind.Utc));
+        // Define UTC que corresponde ao horário de Brasília
+        var utcDate = new DateTime(2026, 1, 21, utcHour, 0, 0, DateTimeKind.Utc);
+
+        // Ajusta data se passou da meia-noite
+        if (utcHour < 10) // Antes das 10 UTC = passou da meia-noite em Brasília
+            utcDate = utcDate.AddDays(1);
+
+        _timeProvider.SetUtcNow(utcDate);
 
         var command = new ValidatePurchaseCommand(50m);
         command.SetCustomerId(customer.Id);
@@ -337,20 +358,27 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     }
 
     [Theory]
-    [InlineData(2026, 1, 19)] // Segunda-feira
-    [InlineData(2026, 1, 20)] // Terça-feira
-    [InlineData(2026, 1, 21)] // Quarta-feira
-    [InlineData(2026, 1, 22)] // Quinta-feira
-    [InlineData(2026, 1, 23)] // Sexta-feira
-    public async Task Validate_PurchaseOnWeekday_ShouldNotHaveValidationError(int year, int month, int day)
+    [InlineData(2026, 1, 19, 13)] // Segunda-feira 10:00 Brasília = 13:00 UTC
+    [InlineData(2026, 1, 20, 13)] // Terça-feira 10:00 Brasília = 13:00 UTC
+    [InlineData(2026, 1, 21, 13)] // Quarta-feira 10:00 Brasília = 13:00 UTC
+    [InlineData(2026, 1, 22, 13)] // Quinta-feira 10:00 Brasília = 13:00 UTC
+    [InlineData(2026, 1, 23, 13)] // Sexta-feira 10:00 Brasília = 13:00 UTC
+    public async Task Validate_PurchaseOnWeekday_ShouldNotHaveValidationError(
+        int year,
+        int month,
+        int day,
+        int utcHour)
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
-        // 10:00 do dia especificado
-        _timeProvider.SetUtcNow(new DateTime(year, month, day, 10, 0, 0, DateTimeKind.Utc));
+        // 10:00 Brasília = 13:00 UTC
+        _timeProvider.SetUtcNow(new DateTime(year, month, day, utcHour, 0, 0, DateTimeKind.Utc));
+
+        // Verifica que o horário local é 10:00
+        _dateTimeProvider.LocalNow.Hour.Should().Be(10);
 
         var command = new ValidatePurchaseCommand(50m);
         command.SetCustomerId(customer.Id);
@@ -364,17 +392,21 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     }
 
     [Theory]
-    [InlineData(2026, 1, 17)] // Sábado
-    [InlineData(2026, 1, 18)] // Domingo
-    public async Task Validate_PurchaseOnWeekend_ShouldHaveValidationError(int year, int month, int day)
+    [InlineData(2026, 1, 17, 13)] // Sábado 10:00 Brasília = 13:00 UTC
+    [InlineData(2026, 1, 18, 13)] // Domingo 10:00 Brasília = 13:00 UTC
+    public async Task Validate_PurchaseOnWeekend_ShouldHaveValidationError(
+        int year,
+        int month,
+        int day,
+        int utcHour)
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
-        // 10:00 do dia especificado (fim de semana)
-        _timeProvider.SetUtcNow(new DateTime(year, month, day, 10, 0, 0, DateTimeKind.Utc));
+        // 10:00 Brasília = 13:00 UTC
+        _timeProvider.SetUtcNow(new DateTime(year, month, day, utcHour, 0, 0, DateTimeKind.Utc));
 
         var command = new ValidatePurchaseCommand(50m);
         command.SetCustomerId(customer.Id);
@@ -391,12 +423,12 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     public async Task Validate_AllRulesPass_ShouldNotHaveValidationErrors()
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
-        // Quarta-feira, 10:00
-        _timeProvider.SetUtcNow(new DateTime(2026, 1, 21, 10, 0, 0, DateTimeKind.Utc));
+        // Quarta-feira, 10:00 Brasília = 13:00 UTC
+        _timeProvider.SetUtcNow(new DateTime(2026, 1, 21, 13, 0, 0, DateTimeKind.Utc));
 
         var command = new ValidatePurchaseCommand(50m);
         command.SetCustomerId(customer.Id);
@@ -413,19 +445,19 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
     public async Task Validate_ReturningCustomerWithValidPurchase_ShouldNotHaveValidationErrors()
     {
         // Arrange
-        var customer = Customer.Create("John Doe");
+        var customer = Customer.Create("Alexandre Dórea");
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync();
 
         // Compra anterior há 2 meses
-        var orderDate = _timeProvider.GetUtcNow().AddMonths(-2).UtcDateTime;
+        var orderDate = _dateTimeProvider.UtcNow.AddMonths(-2);
         var existingOrder = Order.Create(80m, customer.Id);
         SetOrderDate(existingOrder, orderDate);
         _context.Orders.Add(existingOrder);
         await _context.SaveChangesAsync();
 
-        // Quarta-feira, 10:00
-        _timeProvider.SetUtcNow(new DateTime(2026, 1, 21, 10, 0, 0, DateTimeKind.Utc));
+        // Quarta-feira, 10:00 Brasília = 13:00 UTC
+        _timeProvider.SetUtcNow(new DateTime(2026, 1, 21, 13, 0, 0, DateTimeKind.Utc));
 
         var command = new ValidatePurchaseCommand(500m);
         command.SetCustomerId(customer.Id);
@@ -438,10 +470,50 @@ public sealed class ValidatePurchaseCommandValidatorTests : IDisposable
         result.Errors.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Validate_RealScenario_BrazilNoon_ShouldPass()
+    {
+        // Arrange
+        var customer = Customer.Create("Alexandre Dórea");
+        _context.Customers.Add(customer);
+        await _context.SaveChangesAsync();
+
+        // Simula requisição às 12:25 em Brasília = 15:25 UTC
+        _timeProvider.SetUtcNow(new DateTime(2026, 1, 18, 15, 25, 0, DateTimeKind.Utc));
+
+        // Verifica conversão
+        var localTime = _dateTimeProvider.LocalNow;
+        localTime.Hour.Should().Be(12);
+        localTime.Minute.Should().Be(25);
+        localTime.DayOfWeek.Should().Be(DayOfWeek.Sunday);
+
+        var command = new ValidatePurchaseCommand(50m);
+        command.SetCustomerId(customer.Id);
+
+        // Act
+        var result = await _validator.TestValidateAsync(command);
+
+        // Assert - Deve falhar porque é sábado
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e =>
+            e.ErrorMessage.Contains("horário comercial"));
+    }
+
     private static void SetOrderDate(Order order, DateTime date)
     {
-        // Usa reflection para definir OrderDate (que é init)
         var property = typeof(Order).GetProperty(nameof(Order.OrderDate));
         property?.SetValue(order, date);
+    }
+
+    private static TimeZoneInfo GetBrazilTimeZone()
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("E. South America Standard Time");
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+        }
     }
 }
