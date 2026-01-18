@@ -18,6 +18,7 @@ namespace ProvaPub.Api.Controllers;
 public sealed class OrdersController(ISender sender) : ControllerBase
 {
     [HttpGet("{id:int}")]
+    [ApiExplorerSettings(IgnoreApi = true)] //escondendo o path, pois nao faz parte do teste
     [ProducesResponseType(typeof(Result<int>), StatusCodes.Status200OK)]
     public IActionResult GetOrderById(int id, CancellationToken cancellationToken)
     {

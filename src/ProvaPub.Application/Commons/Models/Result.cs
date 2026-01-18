@@ -45,8 +45,8 @@ public sealed class Result<T>
     public static Result<T> Forbidden(string message = "Proibido") =>
         Fail(message, new Error("FORBIDDEN", message));
 
-    public static Result<T> NotFound(string message = "Não encontrado") =>
-        Fail(message, new Error("NOT_FOUND", message));
+    public static Result<T> NotFound(string message) =>
+        Fail("Não encontrado", new Error("NOT_FOUND", message));
 
     public static Result<T> Conflict(string message) =>
         Fail(message, new Error("CONFLICT", message));
