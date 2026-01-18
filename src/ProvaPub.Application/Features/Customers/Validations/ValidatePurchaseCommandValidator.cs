@@ -1,5 +1,6 @@
 ﻿using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using ProvaPub.Application.Commons.Middlewares;
 using ProvaPub.Application.Commons.Persistences;
 using ProvaPub.Application.Features.Customers.Commands;
 
@@ -8,14 +9,14 @@ namespace ProvaPub.Application.Features.Customers.Validations;
 public sealed class ValidatePurchaseCommandValidator : AbstractValidator<ValidatePurchaseCommand>
 {
     private readonly IProvaPubContext _context;
-    private readonly TimeProvider _timeProvider;
+    private readonly IDateTimeProvider _dateTimeProvider;
 
     public ValidatePurchaseCommandValidator(
         IProvaPubContext context,
-        TimeProvider timeProvider)
+        IDateTimeProvider dateTimeProvider)
     {
         _context = context;
-        _timeProvider = timeProvider;
+        _dateTimeProvider = dateTimeProvider;
 
         RuleFor(x => x.PurchaseValue)
             .GreaterThan(0)
@@ -26,22 +27,22 @@ public sealed class ValidatePurchaseCommandValidator : AbstractValidator<Validat
             RuleFor(x => x.CustomerId)
                 .MustAsync(CustomerExists)
                 .WithMessage(x => $"O ID do cliente {x.CustomerId} não encontrado.");
+
+            RuleFor(x => x)
+                .MustAsync(OnlyOnePurchasePerMonth)
+                .WithName("CustomerId")
+                .WithMessage("Um cliente pode efetuar apenas uma compra por mês.");
+
+            RuleFor(x => x)
+                .MustAsync(FirstPurchaseMaxValue)
+                .WithName("CustomerId")
+                .WithMessage("Um cliente que nunca comprou antes pode fazer uma primeira compra de no máximo 100,00.");
         }).Otherwise(() =>
         {
             RuleFor(x => x.CustomerId)
                 .GreaterThan(0)
                 .WithMessage("O ID do cliente deve ser maior que zero.");
         });
-
-        RuleFor(x => x)
-            .MustAsync(OnlyOnePurchasePerMonth)
-            .WithName("CustomerId")
-            .WithMessage("Um cliente pode efetuar apenas uma compra por mês.");
-
-        RuleFor(x => x)
-            .MustAsync(FirstPurchaseMaxValue)
-            .WithName("CustomerId")
-            .WithMessage("Um cliente que nunca comprou antes pode fazer uma primeira compra de no máximo 100,00.");
 
         RuleFor(x => x)
             .Must(DuringBusinessHours)
@@ -61,7 +62,7 @@ public sealed class ValidatePurchaseCommandValidator : AbstractValidator<Validat
         ValidatePurchaseCommand command,
         CancellationToken cancellationToken)
     {
-        var baseDate = _timeProvider.GetUtcNow().AddMonths(-1).UtcDateTime;
+        var baseDate = _dateTimeProvider.UtcNow.AddMonths(-1);
 
         var ordersInThisMonth = await _context.Orders
             .CountAsync(o => o.CustomerId == command.CustomerId && o.OrderDate >= baseDate, cancellationToken);
@@ -86,7 +87,7 @@ public sealed class ValidatePurchaseCommandValidator : AbstractValidator<Validat
     // Business Rule: A customer can purchases only during business hours and working days
     private bool DuringBusinessHours(ValidatePurchaseCommand command)
     {
-        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var now = _dateTimeProvider.LocalNow;
 
         var isOutsideBusinessHours = now.Hour < 8 || now.Hour > 18;
         var isWeekend = now.DayOfWeek == DayOfWeek.Saturday || now.DayOfWeek == DayOfWeek.Sunday;

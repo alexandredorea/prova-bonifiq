@@ -26,6 +26,7 @@ public static class DependencyInjection
     {
         builder.Services.AddValidatorsFromAssembly(assembly);
         builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+        builder.Services.AddSingleton<IDateTimeProvider, BrazilDateTimeProvider>();
     }
 
     private static void AddMediatorPattern(this IHostApplicationBuilder builder, Assembly assembly)
